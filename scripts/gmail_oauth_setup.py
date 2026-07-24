@@ -14,12 +14,19 @@ Prerequisites (Google Cloud Console):
 
 Usage:
   python scripts/gmail_oauth_setup.py /path/to/client_secret.json
+
+If running over a plain SSH session (no GUI browser reachable from this
+machine's $BROWSER), open a second terminal and tunnel the fixed port this
+script listens on, then open the printed URL in a real browser on your
+local machine:
+  ssh -L 8765:localhost:8765 user@remote-host
 """
 import sys
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = ["https://mail.google.com/"]
+LOCAL_PORT = 8765
 
 
 def main():
@@ -31,10 +38,13 @@ def main():
     flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
     # access_type=offline + prompt=consent forces Google to hand back a refresh token
     # even if this account already authorized the app before.
+    # open_browser=False: don't let webbrowser module guess a browser (breaks over SSH,
+    # can land on a text-mode browser with no JS support) — just print the URL instead.
     credentials = flow.run_local_server(
-        port=0,
+        port=LOCAL_PORT,
         access_type="offline",
         prompt="consent",
+        open_browser=False,
     )
 
     print("\n--- Copy these into actual-email-scraper/.env on the server ---")
