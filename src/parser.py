@@ -1,10 +1,28 @@
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 class BankEmailParser:
     @staticmethod
-    def extract_transaction_data(subject: str, body: str, credit_account: str, debit_account: str) -> Optional[Dict[str, Any]]:
+    def _resolve_account(full_text_lower: str, accounts: List[Dict], account_type: str) -> Optional[str]:
+        candidates = [a for a in accounts if a.get("type", "").upper() == account_type]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]["name"]
+
+        # Multiple accounts share this type: disambiguate via each account's "match" keywords.
+        for account in candidates:
+            if any(keyword.lower() in full_text_lower for keyword in account.get("match", [])):
+                return account["name"]
+
+        print(f"[WARN] Multiple {account_type} accounts configured, none matched email content — "
+              f"defaulting to '{candidates[0]['name']}'. Add a distinguishing 'match' keyword in settings.json.")
+        return candidates[0]["name"]
+
+    @staticmethod
+    def extract_transaction_data(subject: str, body: str, accounts: List[Dict]) -> Optional[Dict[str, Any]]:
         full_text = f"{subject}\n{body}"
+        full_text_lower = full_text.lower()
 
         # Extract amount (Matches Chilean Peso formats like $15.990 or $15990)
         amount_match = re.search(r'\$\s?([\d\.]+)', full_text)
@@ -23,11 +41,13 @@ class BankEmailParser:
         payee = payee_match.group(1).strip() if payee_match else "Bank Transaction"
 
         # Determine target account (Credit Card vs Debit/Checking)
-        is_credit = any(keyword in full_text.lower() for keyword in ["credito", "crédito", "tarjeta de credito"])
-        target_account = credit_account if is_credit else debit_account
+        is_credit = any(keyword in full_text_lower for keyword in ["credito", "crédito", "tarjeta de credito"])
+        target_account = BankEmailParser._resolve_account(full_text_lower, accounts, "CREDIT" if is_credit else "DEBIT")
+        if target_account is None:
+            return None
 
         # Determine transaction direction (Expense vs Income)
-        is_income = any(keyword in full_text.lower() for keyword in ["recibida", "abono", "deposito", "depósito", "transferencia a tu favor"])
+        is_income = any(keyword in full_text_lower for keyword in ["recibida", "abono", "deposito", "depósito", "transferencia a tu favor"])
 
         # Expenses must be negative integers in Actual Budget
         final_amount = amount if is_income else -amount

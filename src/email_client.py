@@ -11,7 +11,15 @@ class EmailFetcher:
         # Called on every poll so the access token is always fresh (they expire ~1h).
         self.access_token_provider = access_token_provider
 
-    def fetch_unseen_notifications(self, sender_filter: str) -> List[Dict[str, str]]:
+    @staticmethod
+    def _build_sender_criterion(senders: List[str]) -> str:
+        # IMAP OR takes exactly two operands, so multiple senders nest: (OR FROM a (OR FROM b FROM c))
+        quoted = [s.replace('\\', '\\\\').replace('"', '\\"') for s in senders]
+        if len(quoted) == 1:
+            return f'FROM "{quoted[0]}"'
+        return f'(OR FROM "{quoted[0]}" {EmailFetcher._build_sender_criterion(quoted[1:])})'
+
+    def fetch_unseen_notifications(self, sender_filters: List[str]) -> List[Dict[str, str]]:
         messages_data = []
         try:
             mail = imaplib.IMAP4_SSL(self.server, self.port)
@@ -20,8 +28,8 @@ class EmailFetcher:
             mail.authenticate("XOAUTH2", lambda _challenge: auth_string.encode())
             mail.select("inbox")
 
-            # Search for unread emails from specific sender or containing keywords
-            search_criterion = f'(UNSEEN FROM "{sender_filter}")' if sender_filter else '(UNSEEN)'
+            # Search for unread emails from any of the configured bank notification senders
+            search_criterion = f'(UNSEEN {self._build_sender_criterion(sender_filters)})' if sender_filters else '(UNSEEN)'
             status, messages = mail.search(None, search_criterion)
 
             if status != "OK" or not messages[0]:

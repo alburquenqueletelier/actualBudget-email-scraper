@@ -5,6 +5,7 @@ from email_client import EmailFetcher
 from oauth import refresh_access_token
 from parser import BankEmailParser
 from actual_client import ActualService
+from settings import load_accounts, get_sender_filters
 
 load_dotenv()
 
@@ -21,9 +22,9 @@ GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
 GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN")
 
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL_SECONDS", 300))
-SENDER_FILTER = os.getenv("SEARCH_SENDER_FILTER", "")
-ACCOUNT_CREDIT = os.getenv("ACCOUNT_MAP_CREDIT", "Credit Card")
-ACCOUNT_DEBIT = os.getenv("ACCOUNT_MAP_DEBIT", "Checking")
+
+ACCOUNTS = load_accounts()
+SENDER_FILTERS = get_sender_filters(ACCOUNTS)
 
 def get_access_token() -> str:
     return refresh_access_token(GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN)
@@ -35,14 +36,13 @@ def run():
 
     while True:
         print("[CHECK] Polling inbox for unread bank emails...")
-        emails = email_fetcher.fetch_unseen_notifications(SENDER_FILTER)
+        emails = email_fetcher.fetch_unseen_notifications(SENDER_FILTERS)
 
         for item in emails:
             tx = BankEmailParser.extract_transaction_data(
                 item["subject"],
                 item["body"],
-                ACCOUNT_CREDIT,
-                ACCOUNT_DEBIT
+                ACCOUNTS
             )
             if tx:
                 actual_service.sync_transaction(tx["account"], tx["payee"], tx["amount"])

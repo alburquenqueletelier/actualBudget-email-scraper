@@ -1,0 +1,7 @@
+{
+  // It should fit with the accounts on Actual Budget App.
+  "accounts": [
+    { "name": "Banco Santander TC", "type": "CREDIT", "match": ["santander"] },
+    { "name": "Banco Santander CC", "type": "DEBIT", "match": ["santander"] }
+  ]
+}
