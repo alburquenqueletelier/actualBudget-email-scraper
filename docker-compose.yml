@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  actual-email-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: actual_email_scraper
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - actual_network
+
+networks:
+  actual_network:
+    external: true
