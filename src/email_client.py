@@ -1,20 +1,23 @@
 import imaplib
 import email
 from email.header import decode_header
-from typing import List, Dict, Any
+from typing import Callable, List, Dict, Any
 
 class EmailFetcher:
-    def __init__(self, server: str, port: int, user: str, password: str):
+    def __init__(self, server: str, port: int, user: str, access_token_provider: Callable[[], str]):
         self.server = server
         self.port = port
         self.user = user
-        self.password = password
+        # Called on every poll so the access token is always fresh (they expire ~1h).
+        self.access_token_provider = access_token_provider
 
     def fetch_unseen_notifications(self, sender_filter: str) -> List[Dict[str, str]]:
         messages_data = []
         try:
             mail = imaplib.IMAP4_SSL(self.server, self.port)
-            mail.login(self.user, self.password)
+            access_token = self.access_token_provider()
+            auth_string = f"user={self.user}\x01auth=Bearer {access_token}\x01\x01"
+            mail.authenticate("XOAUTH2", lambda _challenge: auth_string.encode())
             mail.select("inbox")
 
             # Search for unread emails from specific sender or containing keywords
