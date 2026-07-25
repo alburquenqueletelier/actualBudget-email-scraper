@@ -4,7 +4,6 @@ let
   pythonEnv = pkgs.python311.withPackages (ps: with ps; [
     pip
     virtualenv
-    python-dotenv
   ]);
 in
 pkgs.mkShell {

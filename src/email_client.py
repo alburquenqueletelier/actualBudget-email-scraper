@@ -1,7 +1,9 @@
 import imaplib
 import email
+import datetime
 from email.header import decode_header
-from typing import Callable, List, Dict, Any
+from email.utils import parsedate_to_datetime, parseaddr
+from typing import Callable, List, Dict, Any, Optional
 
 class EmailFetcher:
     def __init__(self, server: str, port: int, user: str, access_token_provider: Callable[[], str]):
@@ -19,7 +21,24 @@ class EmailFetcher:
             return f'FROM "{quoted[0]}"'
         return f'(OR FROM "{quoted[0]}" {EmailFetcher._build_sender_criterion(quoted[1:])})'
 
-    def fetch_unseen_notifications(self, sender_filters: List[str]) -> List[Dict[str, str]]:
+    @staticmethod
+    def _imap_date(d: datetime.date) -> str:
+        # IMAP SEARCH date format, e.g. 25-Jul-2026 (day granularity only — no time-of-day).
+        return d.strftime("%d-%b-%Y")
+
+    def fetch_unseen_notifications(
+        self,
+        sender_filters: List[str],
+        since: Optional[datetime.date] = None,
+        before: Optional[datetime.date] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch bank notification emails.
+
+        Default (no date args): only UNSEEN mail — the safe, no-duplicate path.
+        If `since`/`before` given: search by date instead, INCLUDING already-read
+        mail (IMAP dates are day-granular). Re-processing read mail is safe because
+        the Actual side dedupes via imported_id.
+        """
         messages_data = []
         try:
             mail = imaplib.IMAP4_SSL(self.server, self.port)
@@ -28,8 +47,17 @@ class EmailFetcher:
             mail.authenticate("XOAUTH2", lambda _challenge: auth_string.encode())
             mail.select("inbox")
 
-            # Search for unread emails from any of the configured bank notification senders
-            search_criterion = f'(UNSEEN {self._build_sender_criterion(sender_filters)})' if sender_filters else '(UNSEEN)'
+            parts = []
+            if since is None and before is None:
+                parts.append("UNSEEN")
+            if since is not None:
+                parts.append(f'SINCE {self._imap_date(since)}')
+            if before is not None:
+                # IMAP BEFORE is exclusive; add a day so `before` reads as inclusive.
+                parts.append(f'BEFORE {self._imap_date(before + datetime.timedelta(days=1))}')
+            if sender_filters:
+                parts.append(self._build_sender_criterion(sender_filters))
+            search_criterion = f'({" ".join(parts)})' if parts else '(ALL)'
             status, messages = mail.search(None, search_criterion)
 
             if status != "OK" or not messages[0]:
@@ -56,7 +84,22 @@ class EmailFetcher:
                 else:
                     body = msg.get_payload(decode=True).decode(errors='ignore')
 
-                messages_data.append({"subject": subject, "body": body})
+                # Email Date header -> date (fallback: today) for correct tx dating + dedup.
+                email_date = datetime.date.today()
+                if msg["Date"]:
+                    try:
+                        email_date = parsedate_to_datetime(msg["Date"]).date()
+                    except (TypeError, ValueError):
+                        pass
+
+                sender = parseaddr(msg.get("From", ""))[1].lower()
+
+                messages_data.append({
+                    "subject": subject,
+                    "body": body,
+                    "date": email_date,
+                    "sender": sender,
+                })
 
                 # Mark as seen
                 mail.store(num, '+FLAGS', '\\Seen')
