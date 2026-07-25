@@ -111,36 +111,39 @@ def _parse_date(value: str, field: str) -> datetime.date:
 @app.post("/run")
 def trigger(
     x_auth_token: str = Header(default=""),
-    token: str = Query(default=""),
     since: str = Query(default="", description="YYYY-MM-DD; include mail on/after this day (incl. read)"),
     before: str = Query(default="", description="YYYY-MM-DD; include mail on/before this day"),
 ):
-    _check_token(x_auth_token or token)
+    _check_token(x_auth_token)
     since_date = _parse_date(since, "since") if since else None
     before_date = _parse_date(before, "before") if before else None
     return run_once(since=since_date, before=before_date)
 
 
 @app.get("/", response_class=HTMLResponse)
-def button_page(token: str = Query(default="")):
-    _check_token(token)
-    # Token embedded so the bookmark ?token=... carries auth for the POST too.
-    return f"""<!doctype html>
+def button_page():
+    # Public page — holds no secret. Token is typed once, kept in the browser's
+    # localStorage, and sent only as the X-Auth-Token header on the POST /run.
+    return """<!doctype html>
 <html><head><meta charset="utf-8"><title>Email Scraper</title></head>
 <body style="font-family:sans-serif;max-width:32rem;margin:4rem auto;text-align:center">
   <h2>Actual Email Scraper</h2>
+  <p><input id="token" type="password" placeholder="Access token" style="padding:.5rem;width:20rem"></p>
   <button id="run" style="font-size:1.2rem;padding:.8rem 1.5rem;cursor:pointer">Update now</button>
   <pre id="out" style="text-align:left;background:#f4f4f4;padding:1rem;margin-top:1rem"></pre>
   <script>
-    const token = {token!r};
-    document.getElementById('run').onclick = async () => {{
+    const field = document.getElementById('token');
+    field.value = localStorage.getItem('scraper_token') || '';
+    document.getElementById('run').onclick = async () => {
+      const token = field.value.trim();
+      localStorage.setItem('scraper_token', token);
       const out = document.getElementById('out');
       out.textContent = 'Running...';
-      try {{
-        const r = await fetch('/run', {{method:'POST', headers:{{'X-Auth-Token': token}}}});
-        out.textContent = JSON.stringify(await r.json(), null, 2);
-      }} catch (e) {{ out.textContent = 'Error: ' + e; }}
-    }};
+      try {
+        const r = await fetch('/run', {method:'POST', headers:{'X-Auth-Token': token}});
+        out.textContent = r.status + ' ' + JSON.stringify(await r.json(), null, 2);
+      } catch (e) { out.textContent = 'Error: ' + e; }
+    };
   </script>
 </body></html>"""
 
