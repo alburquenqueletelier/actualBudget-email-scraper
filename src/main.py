@@ -80,7 +80,8 @@ def run_once(since: datetime.date = None, before: datetime.date = None) -> dict:
             )
             if not tx:
                 skipped += 1
-                print("[WARN] Email content matched search filter but failed Regex parsing.")
+                preview = " ".join((item["subject"] + " | " + item["body"]).split())[:300]
+                print(f"[WARN] Parse failed (sender={item['sender']}): {preview}")
                 continue
             date = item["date"]
             imported_id = _imported_id(tx["account"], date, tx["amount"], tx["payee"], item["sender"])

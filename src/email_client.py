@@ -1,9 +1,53 @@
 import imaplib
 import email
 import datetime
+import re
+import html
 from email.header import decode_header
 from email.utils import parsedate_to_datetime, parseaddr
 from typing import Callable, List, Dict, Any, Optional
+
+
+def _html_to_text(raw_html: str) -> str:
+    """Crude HTML -> text: drop scripts/styles, tags -> spaces, unescape entities."""
+    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", raw_html)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|tr|li|table|h[1-6])>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    # Collapse runs of spaces/tabs but keep line breaks.
+    text = re.sub(r"[ \t\xa0]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+
+def _extract_body(msg) -> str:
+    """Prefer text/plain; fall back to text/html (tag-stripped) if plain is empty."""
+    plain, html_body = "", ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_maintype() != "text":
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            decoded = payload.decode(errors="ignore")
+            ctype = part.get_content_type()
+            if ctype == "text/plain" and not plain:
+                plain = decoded
+            elif ctype == "text/html" and not html_body:
+                html_body = decoded
+    else:
+        payload = msg.get_payload(decode=True)
+        decoded = payload.decode(errors="ignore") if payload else ""
+        if msg.get_content_type() == "text/html":
+            html_body = decoded
+        else:
+            plain = decoded
+    if plain.strip():
+        return plain
+    return _html_to_text(html_body)
+
 
 class EmailFetcher:
     def __init__(self, server: str, port: int, user: str, access_token_provider: Callable[[], str]):
@@ -75,14 +119,8 @@ class EmailFetcher:
                     decoded = decode_header(raw_subject)[0]
                     subject = decoded[0].decode(decoded[1] or 'utf-8') if isinstance(decoded[0], bytes) else decoded[0]
 
-                # Extract plain text body
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body = part.get_payload(decode=True).decode(errors='ignore')
-                else:
-                    body = msg.get_payload(decode=True).decode(errors='ignore')
+                # Body: text/plain, or HTML tag-stripped fallback
+                body = _extract_body(msg)
 
                 # Email Date header -> date (fallback: today) for correct tx dating + dedup.
                 email_date = datetime.date.today()
