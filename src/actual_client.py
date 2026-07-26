@@ -3,10 +3,11 @@ from actual import Actual
 from actual.queries import reconcile_transaction
 
 class ActualService:
-    def __init__(self, base_url: str, password: str, file_password: str = None):
+    def __init__(self, base_url: str, password: str, file: str, encryption_password: str = None):
         self.base_url = base_url
         self.password = password
-        self.file_password = file_password
+        self.file = file
+        self.encryption_password = encryption_password
 
     def sync_transaction(
         self,
@@ -15,18 +16,18 @@ class ActualService:
         amount: int,
         date: datetime.date,
         imported_id: str,
-    ) -> bool:
+    ) -> str:
         """Add a transaction, deduped via imported_id.
 
-        Returns True if a new transaction was created, False if it matched an
-        existing one (duplicate) or on error. reconcile_transaction matches
+        Returns "created", "duplicate", or "error". reconcile_transaction matches
         strongly on imported_id, else fuzzily on (date, amount).
         """
         try:
             actual = Actual(
                 base_url=self.base_url,
                 password=self.password,
-                file_password=self.file_password if self.file_password else None,
+                file=self.file,
+                encryption_password=self.encryption_password or None,
             )
             with actual:
                 tx = reconcile_transaction(
@@ -43,9 +44,9 @@ class ActualService:
                 actual.commit()
                 if is_new:
                     print(f"[SUCCESS] Transaction added: {payee} | {amount} | {account_name} | {date}")
-                else:
-                    print(f"[SKIP] Duplicate, already present: {payee} | {amount} | {account_name} | {date}")
-                return is_new
+                    return "created"
+                print(f"[SKIP] Duplicate, already present: {payee} | {amount} | {account_name} | {date}")
+                return "duplicate"
         except Exception as e:
             print(f"[ERROR] Actual Budget Sync failed: {e}")
-            return False
+            return "error"

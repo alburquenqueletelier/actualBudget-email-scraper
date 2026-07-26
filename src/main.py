@@ -20,6 +20,9 @@ load_dotenv()
 
 ACTUAL_SERVER_URL = os.getenv("ACTUAL_SERVER_URL")
 ACTUAL_PASSWORD = os.getenv("ACTUAL_PASSWORD")
+# Budget file to open: its name (if unique) or file id. Required by actualpy.
+ACTUAL_SYNC_FILE = os.getenv("ACTUAL_SYNC_FILE")
+# Optional: file-level encryption password (only if E2EE enabled).
 ACTUAL_FILE_PASSWORD = os.getenv("ACTUAL_FILE_PASSWORD")
 
 IMAP_SERVER = os.getenv("IMAP_SERVER", "imap.gmail.com")
@@ -49,7 +52,7 @@ def get_access_token() -> str:
 
 
 email_fetcher = EmailFetcher(IMAP_SERVER, IMAP_PORT, EMAIL_USER, get_access_token)
-actual_service = ActualService(ACTUAL_SERVER_URL, ACTUAL_PASSWORD, ACTUAL_FILE_PASSWORD)
+actual_service = ActualService(ACTUAL_SERVER_URL, ACTUAL_PASSWORD, ACTUAL_SYNC_FILE, ACTUAL_FILE_PASSWORD)
 
 
 def _imported_id(account: str, date: datetime.date, amount: int, payee: str, sender: str) -> str:
@@ -69,6 +72,7 @@ def run_once(since: datetime.date = None, before: datetime.date = None) -> dict:
         emails = email_fetcher.fetch_unseen_notifications(SENDER_FILTERS, since=since, before=before)
         imported = 0
         duplicates = 0
+        errors = 0
         skipped = 0
         for item in emails:
             tx = BankEmailParser.extract_transaction_data(
@@ -85,14 +89,16 @@ def run_once(since: datetime.date = None, before: datetime.date = None) -> dict:
                 continue
             date = item["date"]
             imported_id = _imported_id(tx["account"], date, tx["amount"], tx["payee"], item["sender"])
-            is_new = actual_service.sync_transaction(
+            status = actual_service.sync_transaction(
                 tx["account"], tx["payee"], tx["amount"], date, imported_id
             )
-            if is_new:
+            if status == "created":
                 imported += 1
-            else:
+            elif status == "duplicate":
                 duplicates += 1
-        result = {"fetched": len(emails), "imported": imported, "duplicates": duplicates, "skipped": skipped}
+            else:
+                errors += 1
+        result = {"fetched": len(emails), "imported": imported, "duplicates": duplicates, "errors": errors, "skipped": skipped}
         print(f"[DONE] {result}")
         return result
 
