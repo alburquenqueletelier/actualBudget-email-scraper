@@ -14,7 +14,7 @@ from email_client import EmailFetcher
 from oauth import refresh_access_token
 from parser import BankEmailParser
 from actual_client import ActualService
-from settings import load_accounts, get_sender_filters
+from settings import load_accounts, get_sender_filters, load_parser_config
 
 load_dotenv()
 
@@ -38,6 +38,7 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", 8000))
 
 ACCOUNTS = load_accounts()
 SENDER_FILTERS = get_sender_filters(ACCOUNTS)
+PARSER_CONFIG = load_parser_config()
 
 # One shared run must not overlap another (nightly + manual click).
 _run_lock = threading.Lock()
@@ -74,6 +75,7 @@ def run_once(since: datetime.date = None, before: datetime.date = None) -> dict:
                 item["subject"],
                 item["body"],
                 ACCOUNTS,
+                PARSER_CONFIG,
             )
             if not tx:
                 skipped += 1

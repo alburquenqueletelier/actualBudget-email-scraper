@@ -20,40 +20,47 @@ class BankEmailParser:
         return candidates[0]["name"]
 
     @staticmethod
-    def extract_transaction_data(subject: str, body: str, accounts: List[Dict]) -> Optional[Dict[str, Any]]:
+    def _extract_payee(full_text: str, config: Dict[str, Any]) -> str:
+        # Patterns tried in order; first capture wins (e.g. transfer destination
+        # name before the generic "en/a <merchant>" fallback).
+        for pattern in config["payee_patterns"]:
+            m = re.search(pattern, full_text, re.IGNORECASE)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+        return config["default_payee"]
+
+    @staticmethod
+    def extract_transaction_data(subject: str, body: str, accounts: List[Dict], config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         full_text = f"{subject}\n{body}"
         full_text_lower = full_text.lower()
 
-        # Extract amount (Matches Chilean Peso formats like $15.990 or $15990)
-        amount_match = re.search(r'\$\s?([\d\.]+)', full_text)
+        # Amount (Chilean peso, e.g. "$ 15.990", dot = thousands separator)
+        amount_match = re.search(config["amount_regex"], full_text)
         if not amount_match:
             return None
 
-        # Clean amount string to integer
-        amount_str = amount_match.group(1).replace('.', '')
+        amount_str = amount_match.group(1).replace(config["thousands_separator"], "")
         try:
             amount = int(amount_str)
         except ValueError:
             return None
 
-        # Extract merchant / payee name
-        payee_match = re.search(r'(?:en|a)\s+([A-Za-z0-9\s]+?)(?:\s+el|\s+con|\s+\.|\n|$)', full_text, re.IGNORECASE)
-        payee = payee_match.group(1).strip() if payee_match else "Bank Transaction"
+        payee = BankEmailParser._extract_payee(full_text, config)
 
-        # Determine target account (Credit Card vs Debit/Checking)
-        is_credit = any(keyword in full_text_lower for keyword in ["credito", "crédito", "tarjeta de credito"])
-        target_account = BankEmailParser._resolve_account(full_text_lower, accounts, "CREDIT" if is_credit else "DEBIT")
+        # Credit card vs debit/checking
+        is_credit = any(k in full_text_lower for k in config["credit_keywords"])
+        target_account = BankEmailParser._resolve_account(
+            full_text_lower, accounts, "CREDIT" if is_credit else "DEBIT"
+        )
         if target_account is None:
             return None
 
-        # Determine transaction direction (Expense vs Income)
-        is_income = any(keyword in full_text_lower for keyword in ["recibida", "abono", "deposito", "depósito", "transferencia a tu favor"])
-
-        # Expenses must be negative integers in Actual Budget
+        # Income vs expense; expenses are negative in Actual Budget
+        is_income = any(k in full_text_lower for k in config["income_keywords"])
         final_amount = amount if is_income else -amount
 
         return {
             "payee": payee,
             "amount": final_amount,
-            "account": target_account
+            "account": target_account,
         }
