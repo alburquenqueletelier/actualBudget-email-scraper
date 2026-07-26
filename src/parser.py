@@ -1,6 +1,8 @@
 import re
 from typing import Dict, Any, List, Optional
 
+from settings import account_senders
+
 class BankEmailParser:
     @staticmethod
     def _resolve_account(full_text_lower: str, accounts: List[Dict], account_type: str) -> Optional[str]:
@@ -30,7 +32,7 @@ class BankEmailParser:
         return config["default_payee"]
 
     @staticmethod
-    def extract_transaction_data(subject: str, body: str, accounts: List[Dict], config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def extract_transaction_data(subject: str, body: str, accounts: List[Dict], config: Dict[str, Any], sender: Optional[str] = None) -> Optional[Dict[str, Any]]:
         full_text = f"{subject}\n{body}"
         full_text_lower = full_text.lower()
 
@@ -47,11 +49,20 @@ class BankEmailParser:
 
         payee = BankEmailParser._extract_payee(full_text, config)
 
-        # Credit card vs debit/checking
-        is_credit = any(k in full_text_lower for k in config["credit_keywords"])
-        target_account = BankEmailParser._resolve_account(
-            full_text_lower, accounts, "CREDIT" if is_credit else "DEBIT"
-        )
+        # Resolve account by SENDER first — it's the reliable signal. Body keywords
+        # are unsafe: a transfer email names the *destination* bank (e.g. "Santander")
+        # which would misroute. Sender narrows to that bank's account(s).
+        scoped = [a for a in accounts if sender and sender.lower() in account_senders(a)]
+        if len(scoped) == 1:
+            target_account = scoped[0]["name"]
+        else:
+            # One sender maps to several accounts (e.g. Santander TC+CC share a
+            # sender) — split by credit/debit type, then by "match" keywords.
+            pool = scoped or accounts
+            is_credit = any(k in full_text_lower for k in config["credit_keywords"])
+            target_account = BankEmailParser._resolve_account(
+                full_text_lower, pool, "CREDIT" if is_credit else "DEBIT"
+            )
         if target_account is None:
             return None
 

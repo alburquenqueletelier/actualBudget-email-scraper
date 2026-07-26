@@ -43,11 +43,20 @@ def load_accounts(path: Path = SETTINGS_PATH) -> List[Dict]:
     return _load(path).get("accounts", [])
 
 
+def account_senders(account: Dict) -> List[str]:
+    """Sender addresses for an account. `sender` may be a string or a list."""
+    sender = account.get("sender")
+    if not sender:
+        return []
+    values = [sender] if isinstance(sender, str) else list(sender)
+    return [v.lower() for v in values]
+
+
 def get_sender_filters(accounts: List[Dict]) -> List[str]:
     """Unique, order-preserved list of sender addresses across all configured accounts."""
     seen = []
     for account in accounts:
-        sender = account.get("sender")
-        if sender and sender not in seen:
-            seen.append(sender)
+        for sender in account_senders(account):
+            if sender not in seen:
+                seen.append(sender)
     return seen

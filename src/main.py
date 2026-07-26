@@ -76,6 +76,7 @@ def run_once(since: datetime.date = None, before: datetime.date = None) -> dict:
                 item["body"],
                 ACCOUNTS,
                 PARSER_CONFIG,
+                sender=item["sender"],
             )
             if not tx:
                 skipped += 1
